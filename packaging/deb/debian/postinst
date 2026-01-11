@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        echo "count-files package successfully installed."
+        echo "Configuration file is located at /etc/count-files/count_files.conf"
+        ;;
+esac
+
+exit 0
