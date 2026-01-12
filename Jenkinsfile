@@ -114,11 +114,11 @@ pipeline {
                             set -e
                             export DEBIAN_FRONTEND=noninteractive
 
-                            echo "=== [TEST DEB] Встановлюємо зібраний DEB ==="
+                            echo "зібраний DEB"
                             cd "$WORKSPACE/build_artifacts/deb"
                             dpkg -i ./*.deb || apt-get -f install -y
 
-                            echo "=== [TEST DEB] Перевіряємо виконання count_files ==="
+                            echo "Перевірка виконання count_files"
                             count_files --help || count_files -h || true
                         '''
                     }
