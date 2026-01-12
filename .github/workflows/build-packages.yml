@@ -3,16 +3,45 @@ name: Build Packages
 on:
   push:
     branches: [ main ]
+    tags: [ "v*.*.*" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  build-rpm:
+  test-script:
     runs-on: ubuntu-latest
-    container: fedora:latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Make script executable
+        run: chmod +x count_files.sh
+
+      - name: Bash syntax check
+        run: bash -n count_files.sh
+
+      - name: Run simple tests
+        run: |
+          ./count_files.sh /etc > /tmp/out.txt
+          grep "Статистика директорії" /tmp/out.txt
+
+  build-rpm:
+    needs: test-script
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        distro: [ 'fedora:39', 'fedora:40' ]
+    container: ${{ matrix.distro }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache dnf packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/dnf
+          key: ${{ runner.os }}-dnf-${{ hashFiles('packaging/rpm/count-files.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-dnf-
 
       - name: Install build tools
         run: |
@@ -30,7 +59,6 @@ jobs:
           cp packaging/rpm/count_files.1 ~/rpmbuild/SOURCES/
           cp count_files.conf ~/rpmbuild/SOURCES/
 
-
       - name: Copy spec file
         run: cp packaging/rpm/count-files.spec ~/rpmbuild/SPECS/
 
@@ -40,13 +68,25 @@ jobs:
       - name: Upload RPM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rpm-package
+          name: rpm-package-${{ matrix.distro }}
           path: ~/rpmbuild/RPMS/noarch/*.rpm
 
   build-deb:
-    runs-on: ubuntu-latest
+    needs: test-script
+    strategy:
+      matrix:
+        ubuntu: [ 'ubuntu-22.04', 'ubuntu-24.04' ]
+    runs-on: ${{ matrix.ubuntu }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-${{ hashFiles('packaging/deb/debian/control') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
 
       - name: Install build tools
         run: |
@@ -68,5 +108,64 @@ jobs:
       - name: Upload DEB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: deb-package
+          name: deb-package-${{ matrix.ubuntu }}
           path: build/*.deb
+
+  create-release:
+    needs: [ build-rpm, build-deb ]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download RPM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rpm-package-*
+          path: dist/rpm
+          merge-multiple: true
+
+      - name: Download DEB artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deb-package-*
+          path: dist/deb
+          merge-multiple: true
+
+      - name: Create zip archives
+        run: |
+          mkdir -p dist
+          cd dist
+          zip -r rpm-packages.zip rpm
+          zip -r deb-packages.zip deb
+
+      - name: Create GitHub release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Upload RPM assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/rpm-packages.zip
+          asset_name: rpm-packages.zip
+          asset_content_type: application/zip
+
+      - name: Upload DEB assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/deb-packages.zip
+          asset_name: deb-packages.zip
+          asset_content_type: application/zip
