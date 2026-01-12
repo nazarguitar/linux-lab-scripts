@@ -96,6 +96,11 @@ pipeline {
                             rm -rf "$TMP_SRC/debian"
                             cp -r packaging/deb/debian "$TMP_SRC/debian"
 
+                            echo "=== [DEB] Міняємо формат джерельного пакета на 3.0 (quilt) ==="
+                            if [ -f "$TMP_SRC/debian/source/format" ]; then
+                              sed -i 's/3.0 (native)/3.0 (quilt)/' "$TMP_SRC/debian/source/format"
+                            fi
+
                             echo "=== [DEB] Створюємо ${APP_NAME}_${DEB_VERSION}.orig.tar.gz ==="
                             cd /tmp
                             tar czvf "$WORKSPACE/packaging/${APP_NAME}_${DEB_VERSION}.orig.tar.gz" "${APP_NAME}-${DEB_VERSION}"
