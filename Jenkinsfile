@@ -10,7 +10,6 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                // Дженкінс сам робить checkout з Git, але залишимо явно
                 checkout scm
             }
         }
@@ -18,7 +17,8 @@ pipeline {
         stage('Build RPM') {
             steps {
                 script {
-                    docker.image(env.RPM_IMAGE).inside {
+                    // ТУТ ГОЛОВНА ЗМІНА: запускаємо контейнер як root
+                    docker.image(env.RPM_IMAGE).inside('-u 0:0') {
                         sh '''
                             set -e
 
@@ -63,7 +63,8 @@ pipeline {
         stage('Build DEB') {
             steps {
                 script {
-                    docker.image(env.DEB_IMAGE).inside {
+                    // ТАК САМО: Debian-контейнер теж як root
+                    docker.image(env.DEB_IMAGE).inside('-u 0:0') {
                         sh '''
                             set -e
 
@@ -92,7 +93,7 @@ pipeline {
         stage('Test RPM Installation') {
             steps {
                 script {
-                    docker.image(env.RPM_IMAGE).inside {
+                    docker.image(env.RPM_IMAGE).inside('-u 0:0') {
                         sh '''
                             set -e
                             echo "=== [TEST RPM] Встановлюємо зібраний RPM ==="
@@ -109,16 +110,16 @@ pipeline {
         stage('Test DEB Installation') {
             steps {
                 script {
-                    docker.image(env.DEB_IMAGE).inside {
+                    docker.image(env.DEB_IMAGE).inside('-u 0:0') {
                         sh '''
                             set -e
                             export DEBIAN_FRONTEND=noninteractive
 
-                            echo "зібраний DEB"
+                            echo "=== [TEST DEB] Встановлюємо зібраний DEB ==="
                             cd "$WORKSPACE/build_artifacts/deb"
                             dpkg -i ./*.deb || apt-get -f install -y
 
-                            echo "Перевірка виконання count_files"
+                            echo "=== [TEST DEB] Перевіряємо виконання count_files ==="
                             count_files --help || count_files -h || true
                         '''
                     }
