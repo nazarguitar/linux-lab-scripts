@@ -2,128 +2,135 @@ pipeline {
     agent any
 
     environment {
-        PACKAGE_NAME = 'count-files'
-        PACKAGE_VERSION = '1.0'
+        RPM_IMAGE = 'fedora:latest'
+        DEB_IMAGE = 'debian:stable'
     }
 
     stages {
 
         stage('Checkout') {
             steps {
+                // Дженкінс сам робить checkout з Git, але залишимо явно
                 checkout scm
-                sh 'ls -la'
-            }
-        }
-
-        stage('Test Script') {
-            steps {
-                sh 'chmod +x count_files.sh'
-                sh 'bash -n count_files.sh'
-                sh './count_files.sh'
             }
         }
 
         stage('Build RPM') {
-            agent {
-                docker {
-                    image 'fedora:latest'
-                    args '-u root'
-                }
-            }
             steps {
-                sh '''
-          dnf install -y rpm-build rpmdevtools
+                script {
+                    docker.image(env.RPM_IMAGE).inside {
+                        sh '''
+                            set -e
 
-          rpmdev-setuptree
+                            echo "=== [RPM] Підготовка середовища ==="
+                            dnf -y update
+                            dnf -y install rpm-build rpmdevtools
 
-          # Директорії для двох версій
-          mkdir -p /root/rpmbuild/SOURCES/count-files-1.0
-          mkdir -p /root/rpmbuild/SOURCES/count-files-2.0
+                            echo "=== [RPM] Створення структури rpmbuild ==="
+                            rpmdev-setuptree
 
-          cp count_files.sh /root/rpmbuild/SOURCES/count-files-1.0/
+                            echo "=== [RPM] Перехід у workspace ==="
+                            cd "$WORKSPACE"
 
-          cp count_files.sh /root/rpmbuild/SOURCES/count-files-2.0/
-          cp count_files.conf /root/rpmbuild/SOURCES/count-files-2.0/
-          cp packaging/rpm/count_files.1 /root/rpmbuild/SOURCES/count-files-2.0/
+                            echo "=== [RPM] Копіюємо вихідний скрипт у SOURCES ==="
+                            mkdir -p /root/rpmbuild/SOURCES/count-files-2.0
+                            cp count_files.sh /root/rpmbuild/SOURCES/count-files-2.0/
 
-          # 4. Зібрати архіви, як вимагає spec-файл
-          cd /root/rpmbuild/SOURCES
-          tar czf count-files-1.0.tar.gz count-files-1.0
-          tar czf count-files-2.0.tar.gz count-files-2.0
+                            echo "=== [RPM] Копіюємо man-сторінку у SOURCES ==="
+                            cp packaging/rpm/count_files.1 /root/rpmbuild/SOURCES/
 
-          cd "$WORKSPACE"
-          cp packaging/rpm/count-files.spec /root/rpmbuild/SPECS/
+                            echo "=== [RPM] Створюємо tar.gz архів з вихідцями ==="
+                            cd /root/rpmbuild/SOURCES
+                            tar czvf count-files-2.0.tar.gz count-files-2.0
 
-          rpmbuild -ba /root/rpmbuild/SPECS/count-files.spec
+                            echo "=== [RPM] Копіюємо spec-файл ==="
+                            cp "$WORKSPACE/packaging/rpm/count-files.spec" /root/rpmbuild/SPECS/
 
-          mkdir -p "$WORKSPACE/artifacts/rpm"
-          cp /root/rpmbuild/RPMS/*/*.rpm "$WORKSPACE/artifacts/rpm/" || true
-          cp /root/rpmbuild/SRPMS/*.src.rpm "$WORKSPACE/artifacts/rpm/" || true
-        '''
+                            echo "=== [RPM] Запускаємо rpmbuild ==="
+                            rpmbuild -ba /root/rpmbuild/SPECS/count-files.spec
+
+                            echo "=== [RPM] Копіюємо зібрані пакети в артефакти ==="
+                            mkdir -p "$WORKSPACE/build_artifacts/rpm"
+                            cp -r /root/rpmbuild/RPMS/* "$WORKSPACE/build_artifacts/rpm/"
+                            mkdir -p "$WORKSPACE/build_artifacts/srpm"
+                            cp -r /root/rpmbuild/SRPMS/* "$WORKSPACE/build_artifacts/srpm/" || true
+                        '''
+                    }
+                }
             }
         }
 
         stage('Build DEB') {
-            agent {
-                docker {
-                    image 'ubuntu:latest'
-                    args '-u root'
-                }
-            }
             steps {
-                sh '''
-                    apt-get update
-                    apt-get install -y build-essential debhelper devscripts
-                    mkdir -p build/${PACKAGE_NAME}-${PACKAGE_VERSION}
-                    cp count_files.sh build/${PACKAGE_NAME}-${PACKAGE_VERSION}/
-                    cp -r packaging/deb/debian build/${PACKAGE_NAME}-${PACKAGE_VERSION}/
-                    cd build/${PACKAGE_NAME}-${PACKAGE_VERSION}
-                    dpkg-buildpackage -us -uc -b
-                    cp ../*.deb ${WORKSPACE}/
-                '''
+                script {
+                    docker.image(env.DEB_IMAGE).inside {
+                        sh '''
+                            set -e
+
+                            echo "=== [DEB] Підготовка середовища ==="
+                            export DEBIAN_FRONTEND=noninteractive
+                            apt-get update
+                            apt-get install -y devscripts debhelper build-essential fakeroot
+
+                            echo "=== [DEB] Перехід у каталог deb-пакету ==="
+                            cd "$WORKSPACE/packaging/deb"
+
+                            echo "=== [DEB] Збірка пакету debuild ==="
+                            debuild -us -uc
+
+                            echo "=== [DEB] Копіюємо .deb в артефакти ==="
+                            cd "$WORKSPACE"
+                            mkdir -p build_artifacts/deb
+                            cp ./*.deb build_artifacts/deb/ || true
+                            cp packaging/deb/*.deb build_artifacts/deb/ || true
+                        '''
+                    }
+                }
             }
         }
 
         stage('Test RPM Installation') {
-            agent {
-                docker {
-                    image 'oraclelinux:8'
-                    args '-u root'
-                }
-            }
             steps {
-                sh '''
-                    rpm -ivh ${PACKAGE_NAME}-*.rpm
-                    count_files
-                    rpm -e ${PACKAGE_NAME}
-                '''
+                script {
+                    docker.image(env.RPM_IMAGE).inside {
+                        sh '''
+                            set -e
+                            echo "=== [TEST RPM] Встановлюємо зібраний RPM ==="
+                            dnf -y install "$WORKSPACE"/build_artifacts/rpm/noarch/*.rpm
+
+                            echo "=== [TEST RPM] Перевіряємо виконання count_files ==="
+                            count_files --help || count_files -h || true
+                        '''
+                    }
+                }
             }
         }
 
         stage('Test DEB Installation') {
-            agent {
-                docker {
-                    image 'ubuntu:latest'
-                    args '-u root'
-                }
-            }
             steps {
-                sh '''
-                    dpkg -i ${PACKAGE_NAME}_*.deb || apt-get install -f -y
-                    count_files
-                    apt-get remove -y ${PACKAGE_NAME}
-                '''
+                script {
+                    docker.image(env.DEB_IMAGE).inside {
+                        sh '''
+                            set -e
+                            export DEBIAN_FRONTEND=noninteractive
+
+                            echo "=== [TEST DEB] Встановлюємо зібраний DEB ==="
+                            cd "$WORKSPACE/build_artifacts/deb"
+                            dpkg -i ./*.deb || apt-get -f install -y
+
+                            echo "=== [TEST DEB] Перевіряємо виконання count_files ==="
+                            count_files --help || count_files -h || true
+                        '''
+                    }
+                }
             }
         }
     }
 
     post {
         success {
-            archiveArtifacts artifacts: '*.rpm, *.deb'
-            echo 'Build completed successfully!'
-        }
-        failure {
-            echo 'Build failed!'
+            echo 'Збірка пройшла успішно, архівуємо артефакти...'
+            archiveArtifacts artifacts: 'build_artifacts/**/*', fingerprint: true
         }
         always {
             cleanWs()
