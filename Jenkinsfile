@@ -32,16 +32,34 @@ pipeline {
             }
             steps {
                 sh '''
-                    dnf install -y rpm-build rpmdevtools
-                    rpmdev-setuptree
-                    mkdir -p ~/rpmbuild/SOURCES/${PACKAGE_NAME}-${PACKAGE_VERSION}
-                    cp count_files.sh ~/rpmbuild/SOURCES/${PACKAGE_NAME}-${PACKAGE_VERSION}/
-                    cd ~/rpmbuild/SOURCES
-                    tar czvf ${PACKAGE_NAME}-${PACKAGE_VERSION}.tar.gz ${PACKAGE_NAME}-${PACKAGE_VERSION}
-                    cp ${WORKSPACE}/packaging/rpm/count-files.spec ~/rpmbuild/SPECS/
-                    rpmbuild -ba ~/rpmbuild/SPECS/count-files.spec
-                    cp ~/rpmbuild/RPMS/noarch/*.rpm ${WORKSPACE}/
-                '''
+          dnf install -y rpm-build rpmdevtools
+
+          rpmdev-setuptree
+
+          # Директорії для двох версій
+          mkdir -p /root/rpmbuild/SOURCES/count-files-1.0
+          mkdir -p /root/rpmbuild/SOURCES/count-files-2.0
+
+          cp count_files.sh /root/rpmbuild/SOURCES/count-files-1.0/
+
+          cp count_files.sh /root/rpmbuild/SOURCES/count-files-2.0/
+          cp count_files.conf /root/rpmbuild/SOURCES/count-files-2.0/
+          cp packaging/rpm/count_files.1 /root/rpmbuild/SOURCES/count-files-2.0/
+
+          # 4. Зібрати архіви, як вимагає spec-файл
+          cd /root/rpmbuild/SOURCES
+          tar czf count-files-1.0.tar.gz count-files-1.0
+          tar czf count-files-2.0.tar.gz count-files-2.0
+
+          cd "$WORKSPACE"
+          cp packaging/rpm/count-files.spec /root/rpmbuild/SPECS/
+
+          rpmbuild -ba /root/rpmbuild/SPECS/count-files.spec
+
+          mkdir -p "$WORKSPACE/artifacts/rpm"
+          cp /root/rpmbuild/RPMS/*/*.rpm "$WORKSPACE/artifacts/rpm/" || true
+          cp /root/rpmbuild/SRPMS/*.src.rpm "$WORKSPACE/artifacts/rpm/" || true
+        '''
             }
         }
 
