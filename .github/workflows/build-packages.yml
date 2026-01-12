@@ -140,8 +140,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/**/*.rpm
-            dist/**/*.deb
+            dist/rpm-package-fedora-39/*.rpm
+            dist/rpm-package-fedora-40/*.rpm
+            dist/deb-package-ubuntu-22.04/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
