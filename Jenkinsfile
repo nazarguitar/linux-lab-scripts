@@ -39,6 +39,8 @@ pipeline {
                             echo "=== [RPM] Копіюємо man-сторінку у SOURCES ==="
                             cp packaging/rpm/count_files.1 /root/rpmbuild/SOURCES/
 
+                            cp count_files.conf /root/rpmbuild/SOURCES/
+
                             echo "=== [RPM] Створюємо tar.gz архів з вихідцями ==="
                             cd /root/rpmbuild/SOURCES
                             tar czvf count-files-2.0.tar.gz count-files-2.0
